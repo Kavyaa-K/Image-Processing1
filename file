@@ -1,0 +1,983 @@
+openapi: 3.0.1
+info:
+  title: 910-sponsorfit-report-rpc-api
+  description: Standalone OpenAPI specification for a sponsorFIT RPC reports service
+  contact:
+    name: CX Digital Platform Team
+    email: karthikesan.nagarajan@corebridgefinancial.com
+  license:
+    name: Corebridge Financial - Life and Retirement
+    url: 'https://github.crbgf.net/myproject/master/LICENSE'
+  version: 1.0.7
+servers:
+  - url: https://sponsorfit.dev.connector.corebridgefinancial.com/{APIName}/{MajorVersion}
+    description: Development Server
+  - url: https://sponsorfit.uat.connector.corebridgefinancial.com/{APIName}/{MajorVersion}
+    description: UAT Server
+  - url: https://sponsorfit.live.connector.corebridgefinancial.com/{APIName}/{MajorVersion}
+    description: Production Server
+    variables:
+      env:
+        default: dev
+        description: Environment
+      APIName:
+        default: feature-qa-report-rpc-api
+        description: Name
+      MajorVersion:
+        default: v1
+        description: Version
+paths:
+  /getLatestReportDate:
+    get:
+      tags:
+        - Report API
+      summary: Get Report date.
+      description: Returns the Latest Report As Of date available in system to render reports.
+      operationId: getLatestReportDate
+      security:
+        - OAuth2:
+            - report.read
+      responses:
+        '200':
+          description: Report date returned successfully
+          content:
+            application/json:
+              example:
+                reportDate: '2026-07-31'
+              schema:
+                type: object
+                properties:
+                  reportDate:
+                    type: string
+        '401':
+          description: Unauthorized Error
+        '403':
+          description: Forbidden Error
+        '500':
+          description: Internal Server Error
+  /getChartData:
+    post:
+      tags:
+        - Report API
+      summary: Get chart data.
+      description: Standalone OpenAPI specification for a sponsorFIT RPC reports service.
+      operationId: getChartData
+      parameters:
+        - name: name_id
+          in: header
+          required: true
+          description: User identifier - required for request tracking
+          schema:
+            type: string
+            minLength: 1
+        - $ref: '#/components/parameters/XB3TraceIdHeader'
+      security:
+        - OAuth2:
+            - report.read
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RetirementServiceReportRequest'
+            example:
+              reportName: distribution
+              groupNumber:
+                - '16000'
+                - '17000'
+              period: '12/12/2023'
+              reportStartDate: '2025-01-01'
+              reportEndDate: '2025-01-31'
+              planNumber: '001'
+              subgroupNumber: '001'
+              locationCode: '001'
+              loanIncluded: false
+              productLine: Annuity
+      responses:
+        '200':
+          description: Get chart data successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetirementServiceChartDataResponse'
+              example:
+                message:
+                  type: SUCCESS
+                  code: '200'
+                  description: Chart data fetched successfully
+                graphData:
+                  - period: '12/12/2023'
+                    value:
+                      - key: participantRate
+                        value: '$4335'
+                  - period: '12/12/2024'
+                    value:
+                      - key: participantRate
+                        value: '$4335'
+        '400':
+          description: Request body has missing required fields
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceMessage'
+              example:
+                type: ERROR
+                code: '400'
+                description: Required fields are missing in request payload
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceMessage'
+              example:
+                type: ERROR
+                code: '500'
+                description: Internal Server Error
+        default:
+          description: Get chart data successfully.
+        
+  /publishToQueue:
+    post:
+      tags:
+        - Report API
+      summary: Export report data.
+      description: Builds and persists a Snowflake COPY INTO CSV export job, then publishes it to the export queue.
+      operationId: exportReportData
+      parameters:
+        - name: name_id
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+        - $ref: '#/components/parameters/XB3TraceIdHeader'
+      security:
+        - OAuth2:
+            - report.read
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RetirementServiceReportRequest'
+            example:
+              reportName: planSummaryParticipant
+              groupNumber: '16000'
+              period: M
+              reportStartDate: '2024-09-01'
+              reportEndDate: '2026-07-31'
+              planNumber: '001'
+              subgroupNumber: ''
+              locationCode: ''
+              loanIncluded: true
+              productLine: ''
+              sort: planNumber
+              order: asc
+      responses:
+        '200':
+          description: Export job created successfully
+          content:
+            application/json:
+              schema:
+                type: string
+              example: success
+        '400':
+          description: Request body has missing or invalid fields
+          content:
+            application/json:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                type: string
+        default:
+          description: Export job created successfully.
+  /getDocumentStatuses:
+    get:
+      tags:
+        - Report API
+      summary: List user export records.
+      description: Returns export records owned by the caller identified by the name_id header.
+      operationId: getUserExports
+      parameters:
+        - name: name_id
+          in: header
+          required: true
+          description: User identifier used to fetch the caller's export records.
+          schema:
+            type: string
+            minLength: 1
+            example: SARRAMAK
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of export records to return. When omitted, the service returns all records.
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+            example: 25
+        - name: offset
+          in: query
+          required: false
+          description: Zero-based starting position for pagination. When omitted, the service starts from the first record.
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+            example: 10
+        - $ref: '#/components/parameters/XB3TraceIdHeader'
+      security:
+        - OAuth2:
+            - report.read
+      responses:
+        '200':
+          description: Export records fetched successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetirementServiceExportStatusResponse'
+              example:
+                message:
+                  type: OK
+                  code: '200'
+                  description: Export records fetched successfully.
+                exports:
+                  - reportName: planSummaryParticipant
+                    exportId: 101
+                    fileName: planSummaryParticipant_101_sarramak.csv
+                    created: '2026-09-16 10:45:44.990'
+                    lastModified: '2026-09-16 10:45:44.990'
+                    status: P
+                  - reportName: planSummaryParticipant
+                    exportId: 2
+                    fileName: planSummaryParticipant_2_sarramak.csv
+                    created: '2026-09-16 05:36:10.991'
+                    lastModified: '2026-09-16 05:36:10.991'
+                    status: P
+                  - reportName: planSummaryParticipant
+                    exportId: 1
+                    fileName: planSummaryParticipant_1_sarramak.csv
+                    created: '2026-09-16 05:35:58.764'
+                    lastModified: '2026-09-16 05:35:58.764'
+                    status: P
+        '400':
+          description: Required header missing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceMessage'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceMessage'
+        default:
+          description: Export records fetched successfully.
+        
+  /getDocumentCountByStatus:
+    get:
+      tags:
+        - Report API
+      summary: Get export counts by status.
+      description: Returns the per-status export count breakdown (last 90 days) for the caller identified by the name_id header.
+      operationId: getDocumentCountByStatus
+      parameters:
+        - name: name_id
+          in: header
+          required: true
+          description: User identifier used to fetch the caller's export counts.
+          schema:
+            type: string
+            minLength: 1
+            example: SARRAMAK
+        - $ref: '#/components/parameters/XB3TraceIdHeader'
+      security:
+        - OAuth2:
+            - report.read
+      responses:
+        '200':
+          description: Document counts fetched successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetirementServiceDocumentCountResponse'
+              example:
+                message:
+                  type: OK
+                  code: '200'
+                  description: Document counts fetched successfully.
+                counts:
+                  - status: R
+                    statusDescription: Requested
+                    count: 2
+                  - status: P
+                    statusDescription: Processing
+                    count: 1
+                  - status: C
+                    statusDescription: Completed
+                    count: 0
+                  - status: D
+                    statusDescription: Downloaded
+                    count: 0
+                  - status: E
+                    statusDescription: Error
+                    count: 0
+        '400':
+          description: Required header missing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceMessage'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceMessage'
+        default:
+          description: Document counts fetched successfully.
+  /getDocumentDetail/{exportId}:
+    get:
+      tags:
+        - Report API
+      summary: Get export document details.
+      description: Returns a single export document details with a presigned S3 download URL.
+      operationId: getDocumentDetail
+      parameters:
+        - name: exportId
+          in: path
+          required: true
+          description: Numeric export job identifier in the request path.
+          schema:
+            type: integer
+            format: int64
+        - name: name_id
+          in: header
+          required: true
+          description: User identifier - required for request tracking
+          schema:
+            type: string
+            minLength: 1
+        - $ref: '#/components/parameters/XB3TraceIdHeader'
+      security:
+        - OAuth2:
+            - report.read
+      responses:
+        '200':
+          description: Export record fetched successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetirementServiceExportItemResponse'
+              example:
+                message:
+                  type: OK
+                  code: '200'
+                  description: Export download URL generated successfully.
+                export:
+                  reportName: planSummaryParticipant
+                  exportId: 101
+                  fileName: planSummaryParticipant_101_sarramak.csv
+                  created: '2026-09-16 10:45:44.990'
+                  lastModified: '2026-09-16 10:45:44.990'
+                  status: P
+                  presigned:
+                    link: https://bucket.s3.us-east-1.amazonaws.com/path/to/file.csv?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=...&X-Amz-Date=...&X-Amz-Expires=600&...
+                    action: download
+                    expiresAt: '10'
+        '400':
+          description: Required header or path parameter missing or invalid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceMessage'
+              example:
+                type: ERROR
+                code: '400'
+                description: 'Required path parameter missing: exportId must be numeric'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          description: Export not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceMessage'
+              example:
+                type: ERROR
+                code: '404'
+                description: Export record not found
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceMessage'
+        default:
+          description: Export record fetched successfully.
+  /getTableData:
+    post:
+      tags:
+        - Report API
+      summary: Get report table data.
+      description: Generic table response for all reports where columns vary by reportName.
+      operationId: getTableData
+      parameters:
+        - name: name_id
+          in: header
+          required: true
+          description: User identifier - required for request tracking
+          schema:
+            type: string
+            minLength: 1
+        - $ref: '#/components/parameters/XB3TraceIdHeader'
+      security:
+        - OAuth2:
+            - report.read
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RetirementServiceReportRequest'
+            example:
+              reportName: enrollmentSummary
+              groupNumber:
+                - '16000'
+                - '17000'
+              period: '12/12/2023'
+              reportStartDate: '2025-01-01'
+              reportEndDate: '2025-01-31'
+              planNumber: '001'
+              subgroupNumber: '001'
+              locationCode: '001'
+              loanIncluded: false
+              productLine: Annuity
+              limit: 10
+              offset: 0
+              sort: planNumber
+              order: asc
+      responses:
+        '200':
+          description: Get report table data successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetirementServiceReportTableResponse'
+              example:
+                message:
+                  type: OK
+                  code: '200'
+                  description: Request completed successfully.
+                reportName: enrollmentSummary
+                columns:
+                  - key: planNumber
+                    label: Plan Number
+                    dataType: string
+                  - key: locationCode
+                    label: Location Code
+                    dataType: string
+                  - key: eligibleEmployees
+                    label: Eligible Employees
+                    dataType: integer
+                  - key: enrolledEmployees
+                    label: Enrolled Employees
+                    dataType: integer
+                  - key: enrollmentRate
+                    label: Enrollment Rate
+                    dataType: percent
+                columnTotals:
+                  - key: eligibleEmployees
+                    label: Total Eligible
+                    aggregation: sum
+                    total: 1300
+                  - key: enrolledEmployees
+                    label: Total Enrolled
+                    aggregation: sum
+                    total: 1000
+                  - key: enrollmentRate
+                    label: Overall Enrollment Rate
+                    aggregation: custom
+                    total: 76.92
+                startIndex: 5
+                endIndex: 9
+                totalCount: 5
+                items:
+                  - planNumber: '001'
+                    locationCode: NYC01
+                    eligibleEmployees: 250
+                    enrolledEmployees: 200
+                    enrollmentRate: 80.0
+                  - planNumber: '001'
+                    locationCode: DAL02
+                    eligibleEmployees: 300
+                    enrolledEmployees: 225
+                    enrollmentRate: 75.0
+                  - planNumber: '002'
+                    locationCode: CHI03
+                    eligibleEmployees: 180
+                    enrolledEmployees: 126
+                    enrollmentRate: 70.0
+                  - planNumber: '003'
+                    locationCode: ATL04
+                    eligibleEmployees: 320
+                    enrolledEmployees: 272
+                    enrollmentRate: 85.0
+                  - planNumber: '004'
+                    locationCode: SEA05
+                    eligibleEmployees: 250
+                    enrolledEmployees: 177
+                    enrollmentRate: 70.8
+        '400':
+          description: Request body has missing required fields or pagination parameters are out of range
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceMessage'
+              example:
+                type: ERROR
+                code: '400'
+                description: Required fields are missing in request payload or pagination parameters are invalid
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceMessage'
+              example:
+                type: ERROR
+                code: '500'
+                description: Internal Server Error
+        default:
+          description: Get report table data successfully.
+components:
+  securitySchemes:
+    OAuth2:
+      type: oauth2
+      description: OAuth2 authorization enforced at API gateway.
+      flows:
+        clientCredentials:
+          tokenUrl: https://auth.corebridgefinancial.com/oauth2/token
+          scopes:
+            report.read: Read access for sponsorFIT report APIs
+  parameters:
+    XB3TraceIdHeader:
+      name: x-b3-traceid
+      in: header
+      required: false
+      description: Distributed tracing correlation ID for end-to-end request tracing.
+      schema:
+        type: string
+        minLength: 16
+        maxLength: 64
+  responses:
+    UnauthorizedError:
+      description: Unauthorized Error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ServiceMessage'
+          example:
+            type: ERROR
+            code: '401'
+            description: Authentication failed or access token is missing/invalid
+    ForbiddenError:
+      description: Forbidden Error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ServiceMessage'
+          example:
+            type: ERROR
+            code: '403'
+            description: Authenticated user is not authorized to access this resource
+  schemas:
+    ServiceMessage:
+      type: object
+      properties:
+        type:
+          type: string
+        code:
+          type: string
+        description:
+          type: string
+
+    RetirementServiceReportExportResponse:
+      type: object
+      properties:
+        message:
+          $ref: '#/components/schemas/ServiceMessage'
+        jobId:
+          type: integer
+          format: int64
+        reportName:
+          type: string
+        exportQuery:
+          type: string
+
+    RetirementServiceExportStatusResponse:
+      type: object
+      properties:
+        message:
+          $ref: '#/components/schemas/ServiceMessage'
+        exports:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExportStatusItem'
+
+    RetirementServiceExportItemResponse:
+      type: object
+      properties:
+        message:
+          $ref: '#/components/schemas/ServiceMessage'
+        export:
+          $ref: '#/components/schemas/ExportStatusItem'
+
+    RetirementServiceDocumentCountResponse:
+      type: object
+      properties:
+        message:
+          $ref: '#/components/schemas/ServiceMessage'
+        counts:
+          type: array
+          items:
+            $ref: '#/components/schemas/DocumentStatusCount'
+
+    DocumentStatusCount:
+      type: object
+      properties:
+        status:
+          type: string
+          description: 'Export status code: R=Requested, P=Processing, C=Completed, D=Downloaded, E=Error'
+          example: C
+        statusDescription:
+          type: string
+          example: Completed
+        count:
+          type: integer
+          format: int64
+
+    ExportStatusItem:
+      type: object
+      properties:
+        reportName:
+          type: string
+        exportId:
+          type: integer
+          format: int64
+        fileName:
+          type: string
+          description: Name of the exported CSV file
+        created:
+          type: string
+        lastModified:
+          type: string
+        status:
+          type: string
+        presigned:
+          $ref: '#/components/schemas/ExportPresignedInfo'
+
+    ExportPresignedInfo:
+      type: object
+      properties:
+        link:
+          type: string
+          format: uri
+          description: Temporary presigned S3 URL for the export file
+        action:
+          type: string
+          example: download
+        expiresAt:
+          type: string
+          description: Expiration value returned by the service
+
+    RetirementServiceReportRequest:
+      type: object
+      required:
+        - reportName
+        - groupNumber
+        - period
+        - reportStartDate
+        - reportEndDate
+      additionalProperties: false
+      properties:
+        reportName:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: distribution
+        groupNumber:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: string
+            minLength: 1
+            maxLength: 20
+          example:
+            - '16000'
+            - '17000'
+        period:
+          type: string
+          minLength: 1
+          maxLength: 20
+          example: '12/12/2023'
+        reportStartDate:
+          type: string
+          format: date
+          description: Report start date (YYYY-MM-DD) - required
+          example: '2025-01-01'
+        reportEndDate:
+          type: string
+          format: date
+          description: Report end date (YYYY-MM-DD) - required
+          example: '2025-01-31'
+        planNumber:
+          type: string
+          maxLength: 20
+          example: '001'
+        subgroupNumber:
+          type: string
+          maxLength: 20
+          example: '001'
+        locationCode:
+          type: string
+          maxLength: 20
+          example: '001'
+        loanIncluded:
+          type: boolean
+          default: false
+          example: false
+        productLine:
+          type: string
+          maxLength: 50
+          description: Product line label, for example Annuity or Mutual Fund
+          enum:
+            - Annuity
+            - Mutual Fund
+          example: Annuity
+
+        limit:
+          type: integer
+          format: int32
+          default: 10
+          minimum: 1
+          description: Maximum number of items to return. Defaults to 10 when omitted.
+        offset:
+          type: integer
+          format: int64
+          default: 0
+          minimum: 0
+          description: Zero-based starting position for pagination. Defaults to 0 when omitted.
+        sort:
+          type: string
+          description: Allowlisted column used to sort the results. When omitted, the service uses the report's default sort.
+        order:
+          type: string
+          enum: [asc, desc]
+          default: asc
+          description: Sort direction. Defaults to asc when omitted.
+    RetirementServiceChartDataMetric:
+      type: object
+      required:
+        - key
+        - value
+      properties:
+        key:
+          type: string
+          example: participantRate
+        value:
+          type: string
+          example: '$4335'
+
+    RetirementServiceChartDataPeriod:
+      type: object
+      required:
+        - period
+        - value
+      properties:
+        period:
+          type: string
+          example: '12/12/2023'
+        value:
+          type: array
+          items:
+            $ref: '#/components/schemas/RetirementServiceChartDataMetric'
+
+    RetirementServiceChartDataResponse:
+      type: object
+      properties:
+        message:
+          $ref: '#/components/schemas/ServiceMessage'
+        graphData:
+          type: array
+          items:
+            $ref: '#/components/schemas/RetirementServiceChartDataPeriod'
+
+    GenericCellValue:
+      description: Generic value for any table cell or total.
+      oneOf:
+        - type: string
+        - type: integer
+        - type: number
+        - type: boolean
+      nullable: true
+      example: 4335.75
+
+    TableColumn:
+      type: object
+      required:
+        - key
+        - label
+      properties:
+        key:
+          type: string
+          description: Column key used in each row object.
+          example: participantRate
+        label:
+          type: string
+          description: Display label for UI.
+          example: Participant Rate
+        dataType:
+          type: string
+          description: Optional hint for rendering/formatting.
+          enum:
+            - string
+            - integer
+            - number
+            - boolean
+            - date
+            - datetime
+            - currency
+            - percent
+          example: currency
+
+    ColumnTotal:
+      type: object
+      required:
+        - key
+        - total
+      properties:
+        key:
+          type: string
+          description: Column key this total belongs to.
+          example: participantRate
+        label:
+          type: string
+          description: Optional display label.
+          example: Total Participant Rate
+        aggregation:
+          type: string
+          description: How total was derived.
+          enum:
+            - sum
+            - count
+            - avg
+            - min
+            - max
+            - custom
+          example: sum
+        total:
+          $ref: '#/components/schemas/GenericCellValue'
+
+    TableRow:
+      type: object
+      description: Dynamic row object; keys vary by reportName.
+      additionalProperties:
+        $ref: '#/components/schemas/GenericCellValue'
+      example:
+        period: 12/12/2023
+        participantRate: 4335
+        employerRate: 2100
+
+    RetirementServiceReportTableResponse:
+      type: object
+      required:
+        - message
+        - reportName
+        - columns
+        - columnTotals
+        - startIndex
+        - endIndex
+        - totalCount
+        - items
+      properties:
+        message:
+          $ref: '#/components/schemas/ServiceMessage'
+        reportName:
+          type: string
+          example: distribution
+        startIndex:
+          type: integer
+          format: int64
+          description: Zero-based index of the first item returned in this page.
+          example: 5
+        endIndex:
+          type: integer
+          format: int64
+          description: Zero-based index of the last item returned in this page.
+          example: 9
+        totalCount:
+          type: integer
+          format: int64
+          description: Number of items returned in this page.
+          example: 5
+        columns:
+          type: array
+          items:
+            $ref: '#/components/schemas/TableColumn'
+        columnTotals:
+          type: array
+          items:
+            $ref: '#/components/schemas/ColumnTotal'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/TableRow'
+
+    ExportDownloadResponse:
+      type: object
+      required:
+        - message
+        - downloadUrl
+        - expiresInMinutes
+      properties:
+        message:
+          $ref: '#/components/schemas/ServiceMessage'
+        downloadUrl:
+          type: string
+          format: uri
+          description: Presigned S3 URL valid for 10 minutes for downloading the export file
+          example: 'https://bucket.s3.us-east-1.amazonaws.com/reports/export_12345.csv?X-Amz-Algorithm=AWS4-HMAC-SHA256&...'
+        expiresInMinutes:
+          type: integer
+          description: URL expiration time in minutes
+          example: 10
